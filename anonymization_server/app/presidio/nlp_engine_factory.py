@@ -88,4 +88,4 @@ class PresidioNlpEngineFactory:
             logging.info(f"Loading spaCy model: {model_path}")
             return PresidioNlpEngineFactory.create_nlp_engine_with_flair(model_path)
         else:
-            raise ValueError(f"Model family {model_family} not supported. Use 'spaCy'")
+            raise ValueError(f"Model family {model_family} not supported")
