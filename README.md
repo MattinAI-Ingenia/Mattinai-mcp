@@ -39,3 +39,12 @@ docker compose up --build
 - threshold: Confidence threshold (0-1)
 
 ### 2. MCP (Model Context Protocol)
+`GET /mcp`
+
+Exposes service endpoints as MCP tools for LLM integration. Returns OpenAPI schema compatible with MCP clients, enabling LLMs to discover and use the anonymization service programmatically.
+
+To use it you have to provide the service url to the MCP server, for example:
+
+```
+http://<container_name>:<PORT>/mcp
+```
