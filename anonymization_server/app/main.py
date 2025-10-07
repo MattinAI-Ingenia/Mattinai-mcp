@@ -5,12 +5,15 @@ from typing import List, Dict, Any, Optional
 from fastapi_mcp import FastApiMCP
 import os
 import asyncpg
+import openai
 import re
+import json
 from presidio.processor import PresidioProcessor 
 
 # Global processor cache
 processor_cache = {}
 
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 class AnonymizationRequest(BaseModel):
     text: str
@@ -23,6 +26,7 @@ class AnonymizationResponse(BaseModel):
 
 class NLtoSQLRequest(BaseModel):
     prompt: str
+    schema: str = ""
 
 
 class ValidateSQLRequest(BaseModel):
@@ -105,7 +109,7 @@ async def get_postgres_schema(connection_str='postgresql://postgres:postgres@pos
     print(f"Intentando conectar a: {connection_str}")
     schema = {}
 
-    query = """
+    query_columns = """
     SELECT
         table_name,
         column_name,
@@ -126,34 +130,62 @@ async def get_postgres_schema(connection_str='postgresql://postgres:postgres@pos
         return {}
 
     try:
-        
-        rows = await conn.fetch(query)
+        rows = await conn.fetch(query_columns)
         for row in rows:
             table_name = row['table_name']
             column_name = row['column_name']
             data_type = row['data_type']
+
             if table_name not in schema:
                 schema[table_name] = []
+
             schema[table_name].append({
                 "column": column_name,
                 "type": data_type
             })
+
+        # Filtrar tablas que no tienen registros
+        tables_to_remove = []
+        for table in schema.keys():
+            count_query = f'SELECT COUNT(*) FROM "{table}"'
+            count = await conn.fetchval(count_query)
+            if count == 0:
+                tables_to_remove.append(table)
+
+        if tables_to_remove:
+            print("Tablas sin registros y que se dejarán fuera del esquema:")
+            for table in tables_to_remove:
+                print(f"- {table}")
+
+        # Eliminar tablas sin registros
+        for table in tables_to_remove:
+            schema.pop(table)
+
     finally:
         await conn.close()
     
-    print(type(schema))
+    print(f"Tipo del esquema generado: {type(schema)}")
     return schema
 
 
 @app.post("/generate_sql", operation_id="generate_sql")
 async def generate_sql(request: NLtoSQLRequest):
-    # print('esquema recibido', request.prompt)
-    # schema_str = format_schema(request.schema)
-
     try:
         prompt = f"""
-            Estás ayudando a convertir lenguaje natural a SQL.
-            La información del esquema de la base de datos y la consulta del usuario es la siguiente:
+            Eres un experto en SQL (PostgreSQL). Tu tarea es convertir una consulta en lenguaje natural 
+            a una instrucción SQL válida, usando EXCLUSIVAMENTE las tablas y columnas que aparecen 
+            en el esquema de base de datos proporcionado.
+
+            Reglas importantes:
+            1. Usa solo tablas y columnas que estén en el esquema dado.
+            2. Respeta la sintaxis de PostgreSQL (ANSI SQL estándar cuando aplique).
+            3. No inventes nombres de tablas o columnas.
+            4. Devuelve ÚNICAMENTE la consulta SQL, sin comentarios ni explicaciones adicionales.
+            5. Si la petición no se puede responder con la información disponible en el esquema,
+            devuelve: SELECT 'Not possible';
+            6. Optimiza la consulta para claridad y corrección.
+
+            Esquema y consulta en lenguaje natural:
             {request.prompt}
 
             SQL:
@@ -197,30 +229,102 @@ def extract_identifiers(query: str):
 
     return tables, set(column_parts)
 
-def extract_tables_and_columns_from_text(schema_text: str):
-    """Extrae nombres de tablas y columnas desde texto en lenguaje natural"""
-    table_pattern = r'\*\*(\w+)\*\*'
-    column_pattern = r'- (\w+)\s*\((.*?)\)'
+# def extract_tables_and_columns_from_json(schema_json: str):
+#     """
+#     Extrae tablas y columnas desde un esquema en formato JSON
+#     """
+#     try:
+#         schema = json.loads(schema_json)
+#         tables = set(schema.keys())  # nombres de tablas
+#         columns = set()
+#         for table_name, cols in schema.items():
+#             for col in cols:
+#                 columns.add(col['column'])
+#         return tables, columns
+#     except Exception as e:
+#         print("Error parseando esquema JSON:", e)
+#         return set(), set()
 
-    tables = set(re.findall(table_pattern, schema_text))
-    columns = set(re.findall(column_pattern, schema_text))
-    column_names = {col[0] for col in columns}
-    return tables, column_names
+# @app.post("/validate_sql", operation_id="validate_sql")
+# async def validate_sql(request: ValidateSQLRequest = Body(...)):
+#     try:
+#         print('validacion')
+#         query = request.query
+#         schema_text = request.schema
+#         print(query)
+#         print(schema_text)
+
+#         # Extraer identificadores
+#         tables_used, columns_used = extract_identifiers(query)
+#         print('tablas de la query', tables_used)
+
+#         print('Se han extraído los identificadores del query')
+
+#         all_tables, all_columns = extract_tables_and_columns_from_json(schema_text)
+#         print('Se han extraído las tablas y columnas del texto schema')
+#         print('tablas del esquema',all_tables )
+
+#         invalid_tables = tables_used - all_tables
+#         print('invalid tables', invalid_tables)
+#         invalid_columns = columns_used - all_columns
+
+#         if invalid_tables:
+#             return {"valid": False, "error": f"Tablas no existentes: {', '.join(invalid_tables)}"}
+#         if invalid_columns:
+#             return {"valid": False, "error": f"Columnas no existentes: {', '.join(invalid_columns)}"}
+
+#         return {"valid": True, "error": None}
+
+#     except Exception as e:
+#         return {"valid": False, "error": f"Error durante validación: {str(e)}"}
+
+def extract_tables_and_columns_from_json(schema_text):
+    try:
+        # Convertimos string JSON a diccionario
+        schema = json.loads(schema_text)
+    except json.JSONDecodeError as e:
+        print("Error parseando JSON:", e)
+        return set(), set()
+
+    all_tables = set()
+    all_columns = set()
+
+    # Recorremos las tablas
+    for table in schema.get("tables", []):
+        table_name = table.get("name")
+        if table_name:
+            all_tables.add(table_name)
+        # Recorremos las columnas de cada tabla
+        for column in table.get("columns", []):
+            column_name = column.get("name")
+            if column_name:
+                all_columns.add(column_name)
+    print(all_tables)
+    print('all_tables')
+    return all_tables, all_columns
 
 @app.post("/validate_sql", operation_id="validate_sql")
 async def validate_sql(request: ValidateSQLRequest = Body(...)):
     try:
+        print('validacion')
         query = request.query
         schema_text = request.schema
+     
 
         # Extraer identificadores
         tables_used, columns_used = extract_identifiers(query)
+        print('tablas de la query', tables_used)
+        # print("tipo de schema_text:", type(schema_text))
+        # print("contenido de schema_text:", schema_text)
+
         print('Se han extraído los identificadores del query')
 
-        all_tables, all_columns = extract_tables_and_columns_from_text(schema_text)
+        all_tables, all_columns = extract_tables_and_columns_from_json(schema_text)
         print('Se han extraído las tablas y columnas del texto schema')
+        print('tablas del esquema',all_tables )
 
         invalid_tables = tables_used - all_tables
+        print('invalid tables', invalid_tables)
         invalid_columns = columns_used - all_columns
 
         if invalid_tables:
@@ -236,22 +340,51 @@ async def validate_sql(request: ValidateSQLRequest = Body(...)):
 @app.post("/execute_sql", operation_id="execute_sql")
 async def execute_sql(request: ExecuteSQLRequest = Body(...),  connection_str = 'postgresql://postgres:postgres@postgres-flows:5432/postgres'):
     try:
+        # 1️⃣ Validar que la query sea válida
         if not request.valid:
             return {"error": f"Validación fallida: {request.error or 'Error desconocido'}"}
 
-        query = request.query.strip()
-        if not query:
+        raw_query = request.query.strip()
+        print('received query:', raw_query)
+
+        if not raw_query:
             return {"error": "No se proporcionó una consulta SQL."}
 
+        # Eliminar backticks primero
+        cleaned_query = raw_query.replace("```", "").strip()
+
+        # Manejar el caso donde viene con "json" al inicio
+        if cleaned_query.lower().startswith("json"):
+            # Remover la palabra "json" y limpiar espacios
+            cleaned_query = cleaned_query[4:].strip()
+
+        # Extraer SQL si viene como JSON
+        if cleaned_query.startswith("{"):
+            try:
+                query_dict = json.loads(cleaned_query)
+                query = query_dict.get("query", "").strip()
+                if not query:
+                    return {"error": "JSON recibido no contiene la clave 'query' o está vacío."}
+            except json.JSONDecodeError as e:
+                return {"error": f"JSON inválido en la query: {str(e)}"}
+        else:
+            query = cleaned_query
+
+        print('query limpia', query)
+
+        # 3️⃣ Conectarse a la base de datos
         connection = await asyncpg.connect(connection_str)
 
+        # 4️⃣ Ejecutar SQL
         if query.lower().startswith("select"):
             rows = await connection.fetch(query)
             result = [dict(row) for row in rows]
         else:
             await connection.execute(query)
+            print('esta en la conexion')
             result = "Consulta ejecutada correctamente (sin resultados)"
 
+        # 5️⃣ Cerrar conexión
         await connection.close()
         return {"result": result}
 
