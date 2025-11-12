@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from contextlib import asynccontextmanager
 from typing import List, Dict, Any, Optional
 from fastapi_mcp import FastApiMCP
+# from fastmcp import FastMCP
 import os
 import asyncpg
 import openai
@@ -170,23 +171,108 @@ async def get_postgres_schema(connection_str='postgresql://postgres:postgres@pos
 
 @app.post("/generate_sql", operation_id="generate_sql")
 async def generate_sql(request: NLtoSQLRequest):
+    print('genera query')
     try:
         prompt = f"""
-            Eres un experto en SQL (PostgreSQL). Tu tarea es convertir una consulta en lenguaje natural 
-            a una instrucción SQL válida, usando EXCLUSIVAMENTE las tablas y columnas que aparecen 
-            en el esquema de base de datos proporcionado.
+            Eres un experto analista de datos y especialista en SQL PostgreSQL. Tu misión es traducir consultas 
+            en lenguaje natural a SQL ejecutable de alta calidad.
 
-            Reglas importantes:
-            1. Usa solo tablas y columnas que estén en el esquema dado.
-            2. Respeta la sintaxis de PostgreSQL (ANSI SQL estándar cuando aplique).
-            3. No inventes nombres de tablas o columnas.
-            4. Devuelve ÚNICAMENTE la consulta SQL, sin comentarios ni explicaciones adicionales.
-            5. Si la petición no se puede responder con la información disponible en el esquema,
-            devuelve: SELECT 'Not possible';
-            6. Optimiza la consulta para claridad y corrección.
+            ═══════════════════════════════════════════════════════════════════
+            🎯 OBJETIVO PRINCIPAL
+            ═══════════════════════════════════════════════════════════════════
+            Generar una consulta SQL PostgreSQL válida, eficiente y precisa basándote EXCLUSIVAMENTE 
+            en el esquema proporcionado.
 
-            Esquema y consulta en lenguaje natural:
+            ═══════════════════════════════════════════════════════════════════
+            📋 REGLAS FUNDAMENTALES
+            ═══════════════════════════════════════════════════════════════════
+            1. **Fidelidad al esquema**: Usa ÚNICAMENTE tablas, columnas y relaciones que existan en el esquema.
+            2. **Nomenclatura completa**: Siempre usa schema_name.table_name (ej: public.usuarios)
+            3. **Sintaxis PostgreSQL**: Respeta las particularidades de PostgreSQL (ILIKE, ::, string_agg, etc.)
+            4. **Salida limpia**: Devuelve SOLO la consulta SQL, sin markdown, comentarios ni explicaciones
+            5. **Manejo de imposibles**: Si no puedes responder con el esquema dado, devuelve: SELECT 'Not possible' AS message;
+
+            ═══════════════════════════════════════════════════════════════════
+            🔍 ANÁLISIS DE LA CONSULTA
+            ═══════════════════════════════════════════════════════════════════
+            Antes de escribir SQL, identifica mentalmente:
+            - ¿Qué tablas necesito? ¿Están en el esquema?
+            - ¿Necesito hacer JOINs? ¿Qué columnas las relacionan?
+            - ¿Hay agregaciones? (COUNT, SUM, AVG, etc.)
+            - ¿Necesito filtros? (WHERE, HAVING)
+            - ¿Hay ordenamiento o límites? (ORDER BY, LIMIT)
+            - ¿Hay subconsultas o CTEs necesarias?
+
+            ═══════════════════════════════════════════════════════════════════
+            🔗 GUÍA PARA JOINS
+            ═══════════════════════════════════════════════════════════════════
+            - **INNER JOIN**: Cuando necesites datos que DEBEN existir en ambas tablas
+            - **LEFT JOIN**: Cuando necesites todos los registros de la tabla principal, tengan o no coincidencia
+            - **RIGHT JOIN**: Raramente usado, considera reformular con LEFT JOIN
+            - **Claves foráneas**: Busca en el esquema columnas como user_id, customer_id, etc.
+            - **Nomenclatura común**: Si ves tabla_id en otra tabla, probablemente sea la clave foránea
+            - **Alias claros**: Usa alias descriptivos (u para users, o para orders)
+
+            Ejemplo de JOIN bien construido:
+            SELECT u.nombre, COUNT(o.id) as total_pedidos
+            FROM public.usuarios u
+            LEFT JOIN public.pedidos o ON u.id = o.usuario_id
+            GROUP BY u.id, u.nombre
+
+            ═══════════════════════════════════════════════════════════════════
+            📊 AGREGACIONES Y AGRUPAMIENTO
+            ═══════════════════════════════════════════════════════════════════
+            - Si usas funciones de agregación (COUNT, SUM, AVG, MAX, MIN), necesitas GROUP BY
+            - GROUP BY debe incluir TODAS las columnas no agregadas del SELECT
+            - HAVING se usa para filtrar DESPUÉS de agrupar
+            - WHERE se usa para filtrar ANTES de agrupar
+
+            ═══════════════════════════════════════════════════════════════════
+            🎨 BUENAS PRÁCTICAS DE POSTGRESQL
+            ═══════════════════════════════════════════════════════════════════
+            - Usa ILIKE en lugar de LIKE para búsquedas case-insensitive
+            - Para concatenar strings: string_agg(column, ', ') o column1 || ' ' || column2
+            - Para fechas: DATE_TRUNC, EXTRACT, AGE, CURRENT_DATE
+            - Para JSON: ->, ->>, jsonb_agg
+            - Para arrays: array_agg, ANY, ALL
+            - Para conversión de tipos: ::integer, ::date, ::text
+            - Para valores NULL: COALESCE(column, 'default_value')
+
+            ═══════════════════════════════════════════════════════════════════
+            ⚡ OPTIMIZACIÓN
+            ═══════════════════════════════════════════════════════════════════
+            - Selecciona solo las columnas necesarias (evita SELECT *)
+            - Filtra lo antes posible (WHERE antes de JOIN cuando sea posible)
+            - Usa LIMIT cuando sea apropiado
+            - Considera DISTINCT solo si realmente hay duplicados
+
+            ═══════════════════════════════════════════════════════════════════
+            🚨 CASOS ESPECIALES
+            ═══════════════════════════════════════════════════════════════════
+            - **Top N por grupo**: Usa WINDOW FUNCTIONS (ROW_NUMBER() OVER (PARTITION BY...))
+            - **Fechas relativas**: "últimos 30 días" → WHERE fecha >= CURRENT_DATE - INTERVAL '30 days'
+            - **Porcentajes**: Usa CAST o :: para convertir a numeric antes de dividir
+            - **Subconsultas**: Usa cuando necesites filtrar por resultados agregados
+            - **CTEs (WITH)**: Usa para consultas complejas que necesiten claridad
+
+            ═══════════════════════════════════════════════════════════════════
+            📝 CONSULTA DEL USUARIO
+            ═══════════════════════════════════════════════════════════════════
             {request.prompt}
+
+            ═══════════════════════════════════════════════════════════════════
+            🗄️ ESQUEMA DE BASE DE DATOS DISPONIBLE
+            ═══════════════════════════════════════════════════════════════════
+            {request.schema}
+
+            ═══════════════════════════════════════════════════════════════════
+            💡 INSTRUCCIONES FINALES
+            ═══════════════════════════════════════════════════════════════════
+            Ahora genera la consulta SQL. Recuerda:
+            - Solo SQL, sin explicaciones
+            - Usa el esquema completo (schema.table)
+            - Verifica que todas las columnas y tablas existan en el esquema
+            - Si es imposible, devuelve: SELECT 'Not possible' AS message;
 
             SQL:
         """
@@ -229,55 +315,6 @@ def extract_identifiers(query: str):
 
     return tables, set(column_parts)
 
-# def extract_tables_and_columns_from_json(schema_json: str):
-#     """
-#     Extrae tablas y columnas desde un esquema en formato JSON
-#     """
-#     try:
-#         schema = json.loads(schema_json)
-#         tables = set(schema.keys())  # nombres de tablas
-#         columns = set()
-#         for table_name, cols in schema.items():
-#             for col in cols:
-#                 columns.add(col['column'])
-#         return tables, columns
-#     except Exception as e:
-#         print("Error parseando esquema JSON:", e)
-#         return set(), set()
-
-# @app.post("/validate_sql", operation_id="validate_sql")
-# async def validate_sql(request: ValidateSQLRequest = Body(...)):
-#     try:
-#         print('validacion')
-#         query = request.query
-#         schema_text = request.schema
-#         print(query)
-#         print(schema_text)
-
-#         # Extraer identificadores
-#         tables_used, columns_used = extract_identifiers(query)
-#         print('tablas de la query', tables_used)
-
-#         print('Se han extraído los identificadores del query')
-
-#         all_tables, all_columns = extract_tables_and_columns_from_json(schema_text)
-#         print('Se han extraído las tablas y columnas del texto schema')
-#         print('tablas del esquema',all_tables )
-
-#         invalid_tables = tables_used - all_tables
-#         print('invalid tables', invalid_tables)
-#         invalid_columns = columns_used - all_columns
-
-#         if invalid_tables:
-#             return {"valid": False, "error": f"Tablas no existentes: {', '.join(invalid_tables)}"}
-#         if invalid_columns:
-#             return {"valid": False, "error": f"Columnas no existentes: {', '.join(invalid_columns)}"}
-
-#         return {"valid": True, "error": None}
-
-#     except Exception as e:
-#         return {"valid": False, "error": f"Error durante validación: {str(e)}"}
-
 def extract_tables_and_columns_from_json(schema_text):
     try:
         # Convertimos string JSON a diccionario
@@ -303,6 +340,24 @@ def extract_tables_and_columns_from_json(schema_text):
     print('all_tables')
     return all_tables, all_columns
 
+def clean_column_identifiers(columns_used):
+    cleaned = set()
+    for col in columns_used:
+        # Eliminar alias tipo "AS algo"
+        col = re.sub(r"\s+AS\s+\w+", "", col, flags=re.IGNORECASE)
+
+        # Eliminar funciones SQL comunes (ej: DATE_TRUNC(...), SUM(...), etc.)
+        col = re.sub(r"\b[A-Z_]+\s*\([^)]*\)", "", col, flags=re.IGNORECASE)
+
+        # Quitar comas, paréntesis, y espacios residuales
+        col = col.replace(")", "").replace("(", "")
+        col = col.replace(",", "").strip().strip('"').strip("'")
+
+        # Ignorar vacíos o palabras reservadas
+        if col and col.upper() not in {"DATE_TRUNC", "SUM", "COUNT", "AVG", "MIN", "MAX"}:
+            cleaned.add(col)
+    return cleaned
+
 @app.post("/validate_sql", operation_id="validate_sql")
 async def validate_sql(request: ValidateSQLRequest = Body(...)):
     try:
@@ -313,7 +368,9 @@ async def validate_sql(request: ValidateSQLRequest = Body(...)):
 
         # Extraer identificadores
         tables_used, columns_used = extract_identifiers(query)
+        columns_used = clean_column_identifiers(columns_used)
         print('tablas de la query', tables_used)
+        print('columns used  de la query_____________________', columns_used)
         # print("tipo de schema_text:", type(schema_text))
         # print("contenido de schema_text:", schema_text)
 
@@ -336,6 +393,14 @@ async def validate_sql(request: ValidateSQLRequest = Body(...)):
 
     except Exception as e:
         return {"valid": False, "error": f"Error durante validación: {str(e)}"}
+
+@app.post("/saludar")
+async def saludar_tool(nombre: str):
+    """
+    Tool simple que saluda a la persona cuyo nombre se recibe como argumento.
+    """
+    return {"mensaje": f"¡Hola chiribita, {nombre}!"}
+
 
 @app.post("/execute_sql", operation_id="execute_sql")
 async def execute_sql(request: ExecuteSQLRequest = Body(...),  connection_str = 'postgresql://postgres:postgres@postgres-flows:5432/postgres'):
@@ -391,6 +456,8 @@ async def execute_sql(request: ExecuteSQLRequest = Body(...),  connection_str = 
     except Exception as e:
         return {"error": f"Error al ejecutar SQL: {str(e)}"}
 
+# mcp = FastMCP.from_fastapi(app=app)
+
 mcp = FastApiMCP(
     app,
     name="Anonymization MCP",
@@ -398,5 +465,61 @@ mcp = FastApiMCP(
     describe_all_responses=True,
     describe_full_response_schema=True
 )
+# print(dir(mcp))
+# import inspect
+
+# for attr_name in dir(mcp):
+#     attr = getattr(mcp, attr_name)
+#     if inspect.isfunction(attr) or inspect.ismethod(attr):
+#         print(f"--- {attr_name} ---")
+#         print(inspect.getdoc(attr))
+#         print()
+
+# print('---------------------------')
+# print(mcp._describe_all_responses())
+# @app.get("/mcp/describe")
+# async def mcp_description():
+#     return JSONResponse(mcp.describe_all_responses)
 
 mcp.mount()
+
+print(dir(mcp))
+print(mcp.setup_server)
+print(mcp.description)
+print('---------------------------')
+# print(mcp.tools)
+print('---------------------------')
+print(mcp.server)
+
+from fastapi.responses import JSONResponse
+
+@app.get("/mcp/describe")
+async def mcp_describe():
+    tools_json = [tool.dict() for tool in mcp.tools]
+    return JSONResponse(tools_json)
+
+from fastapi import Body
+
+@app.post("/mcp")
+async def mcp_call_tool(
+    tool_name: str = Body(..., embed=True),
+    arguments: dict = Body(default_factory=dict),
+):
+    """
+    Ejecuta una tool MCP usando tool_name y argumentos.
+    """
+    result = await mcp._execute_api_tool(
+        client=mcp._http_client,
+        tool_name=tool_name,
+        arguments=arguments,
+        operation_map=mcp.operation_map
+    )
+    return result
+
+# from fastapi_mcp.transport.sse import FastApiSseTransport
+
+# sse_transport = FastApiSseTransport("/mcp/messages/")
+
+# @app.post("/mcp/messages/")
+# async def mcp_messages(request: Request):
+#     return await sse_transport.handle_fastapi_post_message(request)
