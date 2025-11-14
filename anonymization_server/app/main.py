@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Body
+from fastapi import FastAPI, HTTPException, Body, Request
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 from typing import List, Dict, Any, Optional
@@ -34,6 +34,9 @@ class AnonymizationResponse(BaseModel):
 class NLtoSQLRequest(BaseModel):
     prompt: str
     # schema: str = ""
+
+class ChatMessage(BaseModel):
+    message: str
 
 
 class ValidateSQLRequest(BaseModel):
@@ -174,14 +177,15 @@ async def get_postgres_schema(connection_str='postgresql://postgres:postgres@pos
     print(f"Tipo del esquema generado: {type(schema)}")
     return schema
 
-@app.post("/generate_sql", operation_id="generate_sql")
-async def generate_sql(request: str):
-    print('genera query en el mcp')
+@app.post("/generate_sql")
+async def generate_sql(request: ChatMessage):
+    prompt_text = request.message
+    
     try:
         prompt = f"""
             You are an expert data analyst in SQL generator . Your mission is to translate queries in natural language into high-quality executable SQL.
 
-            {request}
+            {prompt_text}
 
             ##RULES
             1. **Only** use columns and tables that are present in the databse schema.
@@ -206,8 +210,7 @@ async def generate_sql(request: str):
             "query": generated sql query,
             "x_column": exact same name given to the x column on the generated query,
             "y_column": exact same name given to the y column on the generated query, if we have more than one y column, separate the titles with commas.
-            }}
-           
+           }}
         """
         print('promots')
         response = client.chat.completions.create(
@@ -223,144 +226,11 @@ async def generate_sql(request: str):
 
         sql_response = response.choices[0].message.content
         print(sql_response)
-        print(type(sql_response))
-        # return sql_response
-
-        try:
-            sql_json = json.loads(sql_response)
-            print(sql_json)
-            print(type(sql_json))
-            return sql_json
-        except json.JSONDecodeError as e:
-            return {"error": f"Error parsing JSON: {e}", "raw_response": sql_response}
+        return {"response":f"{sql_response}"}
 
     except Exception as e:
         return {"error": str(e)}
 
-
-# @app.post("/generate_sql", operation_id="generate_sql")
-# async def generate_sql(request: NLtoSQLRequest):
-#     print('genera query')
-#     try:
-#         prompt = f"""
-#             Eres un experto analista de datos y especialista en SQL PostgreSQL. Tu misión es traducir consultas 
-#             en lenguaje natural a SQL ejecutable de alta calidad.
-
-#             ═══════════════════════════════════════════════════════════════════
-#             🎯 OBJETIVO PRINCIPAL
-#             ═══════════════════════════════════════════════════════════════════
-#             Generar una consulta SQL PostgreSQL válida, eficiente y precisa basándote EXCLUSIVAMENTE 
-#             en el esquema proporcionado.
-
-#             ═══════════════════════════════════════════════════════════════════
-#             📋 REGLAS FUNDAMENTALES
-#             ═══════════════════════════════════════════════════════════════════
-#             1. **Fidelidad al esquema**: Usa ÚNICAMENTE tablas, columnas y relaciones que existan en el esquema.
-#             2. **Nomenclatura completa**: Siempre usa schema_name.table_name (ej: public.usuarios)
-#             3. **Sintaxis PostgreSQL**: Respeta las particularidades de PostgreSQL (ILIKE, ::, string_agg, etc.)
-#             4. **Salida limpia**: Devuelve SOLO la consulta SQL, sin markdown, comentarios ni explicaciones
-#             5. **Manejo de imposibles**: Si no puedes responder con el esquema dado, devuelve: SELECT 'Not possible' AS message;
-
-#             ═══════════════════════════════════════════════════════════════════
-#             🔍 ANÁLISIS DE LA CONSULTA
-#             ═══════════════════════════════════════════════════════════════════
-#             Antes de escribir SQL, identifica mentalmente:
-#             - ¿Qué tablas necesito? ¿Están en el esquema?
-#             - ¿Necesito hacer JOINs? ¿Qué columnas las relacionan?
-#             - ¿Hay agregaciones? (COUNT, SUM, AVG, etc.)
-#             - ¿Necesito filtros? (WHERE, HAVING)
-#             - ¿Hay ordenamiento o límites? (ORDER BY, LIMIT)
-#             - ¿Hay subconsultas o CTEs necesarias?
-
-#             ═══════════════════════════════════════════════════════════════════
-#             🔗 GUÍA PARA JOINS
-#             ═══════════════════════════════════════════════════════════════════
-#             - **INNER JOIN**: Cuando necesites datos que DEBEN existir en ambas tablas
-#             - **LEFT JOIN**: Cuando necesites todos los registros de la tabla principal, tengan o no coincidencia
-#             - **RIGHT JOIN**: Raramente usado, considera reformular con LEFT JOIN
-#             - **Claves foráneas**: Busca en el esquema columnas como user_id, customer_id, etc.
-#             - **Nomenclatura común**: Si ves tabla_id en otra tabla, probablemente sea la clave foránea
-#             - **Alias claros**: Usa alias descriptivos (u para users, o para orders)
-
-#             Ejemplo de JOIN bien construido:
-#             SELECT u.nombre, COUNT(o.id) as total_pedidos
-#             FROM public.usuarios u
-#             LEFT JOIN public.pedidos o ON u.id = o.usuario_id
-#             GROUP BY u.id, u.nombre
-
-#             ═══════════════════════════════════════════════════════════════════
-#             📊 AGREGACIONES Y AGRUPAMIENTO
-#             ═══════════════════════════════════════════════════════════════════
-#             - Si usas funciones de agregación (COUNT, SUM, AVG, MAX, MIN), necesitas GROUP BY
-#             - GROUP BY debe incluir TODAS las columnas no agregadas del SELECT
-#             - HAVING se usa para filtrar DESPUÉS de agrupar
-#             - WHERE se usa para filtrar ANTES de agrupar
-
-#             ═══════════════════════════════════════════════════════════════════
-#             🎨 BUENAS PRÁCTICAS DE POSTGRESQL
-#             ═══════════════════════════════════════════════════════════════════
-#             - Usa ILIKE en lugar de LIKE para búsquedas case-insensitive
-#             - Para concatenar strings: string_agg(column, ', ') o column1 || ' ' || column2
-#             - Para fechas: DATE_TRUNC, EXTRACT, AGE, CURRENT_DATE
-#             - Para JSON: ->, ->>, jsonb_agg
-#             - Para arrays: array_agg, ANY, ALL
-#             - Para conversión de tipos: ::integer, ::date, ::text
-#             - Para valores NULL: COALESCE(column, 'default_value')
-
-#             ═══════════════════════════════════════════════════════════════════
-#             ⚡ OPTIMIZACIÓN
-#             ═══════════════════════════════════════════════════════════════════
-#             - Selecciona solo las columnas necesarias (evita SELECT *)
-#             - Filtra lo antes posible (WHERE antes de JOIN cuando sea posible)
-#             - Usa LIMIT cuando sea apropiado
-#             - Considera DISTINCT solo si realmente hay duplicados
-
-#             ═══════════════════════════════════════════════════════════════════
-#             🚨 CASOS ESPECIALES
-#             ═══════════════════════════════════════════════════════════════════
-#             - **Top N por grupo**: Usa WINDOW FUNCTIONS (ROW_NUMBER() OVER (PARTITION BY...))
-#             - **Fechas relativas**: "últimos 30 días" → WHERE fecha >= CURRENT_DATE - INTERVAL '30 days'
-#             - **Porcentajes**: Usa CAST o :: para convertir a numeric antes de dividir
-#             - **Subconsultas**: Usa cuando necesites filtrar por resultados agregados
-#             - **CTEs (WITH)**: Usa para consultas complejas que necesiten claridad
-
-#             ═══════════════════════════════════════════════════════════════════
-#             📝 CONSULTA DEL USUARIO
-#             ═══════════════════════════════════════════════════════════════════
-#             {request.prompt}
-
-#             ═══════════════════════════════════════════════════════════════════
-#             🗄️ ESQUEMA DE BASE DE DATOS DISPONIBLE
-#             ═══════════════════════════════════════════════════════════════════
-#             {request.schema}
-
-#             ═══════════════════════════════════════════════════════════════════
-#             💡 INSTRUCCIONES FINALES
-#             ═══════════════════════════════════════════════════════════════════
-#             Ahora genera la consulta SQL. Recuerda:
-#             - Solo SQL, sin explicaciones
-#             - Usa el esquema completo (schema.table)
-#             - Verifica que todas las columnas y tablas existan en el esquema
-#             - Si es imposible, devuelve: SELECT 'Not possible' AS message;
-
-#             SQL:
-#         """
-
-#         response = openai.ChatCompletion.create(
-#             model="gpt-4",
-#             messages=[
-#                 {"role": "system", "content": "Eres un experto en SQL y PostgreSQL."},
-#                 {"role": "user", "content": prompt}
-#             ],
-#             temperature=0.2,
-#             max_tokens=300
-#         )
-
-#         sql = response["choices"][0]["message"]["content"]
-#         return {"sql": sql.strip()}
-
-#     except Exception as e:
-#         return {"error": str(e)}
 
 def extract_identifiers(query: str):
     print('Extract identifiers for query:', query)
@@ -555,13 +425,8 @@ mcp = FastApiMCP(
 
 mcp.mount()
 
-print(dir(mcp))
-print(mcp.setup_server)
-print(mcp.description)
-print('---------------------------')
 # print(mcp.tools)
-print('---------------------------')
-print(mcp.server)
+
 
 from fastapi.responses import JSONResponse
 
