@@ -6,6 +6,7 @@ from fastapi_mcp import FastApiMCP
 import os
 import asyncpg
 import re
+import logging
 from presidio.processor import PresidioProcessor 
 
 # Global processor cache
@@ -23,7 +24,6 @@ class AnonymizationResponse(BaseModel):
 
 class NLtoSQLRequest(BaseModel):
     prompt: str
-
 
 class ValidateSQLRequest(BaseModel):
     query: str
@@ -99,10 +99,69 @@ async def anonymize_text(request: AnonymizationRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing text: {str(e)}")
 
+class WordCountRequest(BaseModel):
+    text: str
+    include_spaces: bool = False
+    case_sensitive: bool = False
+
+class WordCountResponse(BaseModel):
+    word_count: int
+    character_count: int
+    character_count_no_spaces: int
+    sentence_count: int
+    paragraph_count: int
+    most_common_word: str
+    most_common_count: int
+
+@app.post("/word_count", response_model=WordCountResponse, operation_id="count_words")
+async def count_words(request: WordCountRequest):
+    try:
+        text = request.text
+        if not text.strip():
+            raise HTTPException(status_code=400, detail="El texto no puede estar vacío")
+        
+        # Contadores básicos
+        words = text.split()
+        word_count = len(words)
+        character_count = len(text)
+        character_count_no_spaces = len(text.replace(' ', ''))
+        
+        # Contar oraciones (aproximado)
+        sentence_count = len(re.findall(r'[.!?]+', text))
+        
+        # Contar párrafos
+        paragraph_count = len([p for p in text.split('\n\n') if p.strip()])
+        
+        # Palabra más común
+        if not request.case_sensitive:
+            words = [w.lower() for w in words]
+        
+        # Limpiar palabras de puntuación
+        clean_words = [re.sub(r'[^\w]', '', word) for word in words if word]
+        word_freq = {}
+        for word in clean_words:
+            if word:
+                word_freq[word] = word_freq.get(word, 0) + 1
+        
+        most_common_word = max(word_freq, key=word_freq.get) if word_freq else ""
+        most_common_count = word_freq.get(most_common_word, 0)
+        
+        return WordCountResponse(
+            word_count=word_count,
+            character_count=character_count,
+            character_count_no_spaces=character_count_no_spaces,
+            sentence_count=sentence_count,
+            paragraph_count=paragraph_count,
+            most_common_word=most_common_word,
+            most_common_count=most_common_count
+        )
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error procesando el texto: {str(e)}")
 
 @app.post("/get_postgres_schema", operation_id="get_postgres_schema")
 async def get_postgres_schema(connection_str='postgresql://postgres:postgres@postgres-flows:5432/postgres'):
-    print(f"Intentando conectar a: {connection_str}")
+    logging.info(f"Trying to connect to: {connection_str}")
     schema = {}
 
     query = """
@@ -126,7 +185,6 @@ async def get_postgres_schema(connection_str='postgresql://postgres:postgres@pos
         return {}
 
     try:
-        
         rows = await conn.fetch(query)
         for row in rows:
             table_name = row['table_name']
@@ -141,9 +199,7 @@ async def get_postgres_schema(connection_str='postgresql://postgres:postgres@pos
     finally:
         await conn.close()
     
-    print(type(schema))
     return schema
-
 
 @app.post("/generate_sql", operation_id="generate_sql")
 async def generate_sql(request: NLtoSQLRequest):
