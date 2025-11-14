@@ -173,68 +173,68 @@ async def count_words(request: WordCountRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error procesando el texto: {str(e)}")
 
-@app.post("/get_postgres_schema", operation_id="get_postgres_schema")
-async def get_postgres_schema(connection_str='postgresql://postgres:postgres@postgres-flows:5432/postgres'):
-    logging.info(f"Trying to connect to: {connection_str}")
-    schema = {}
+# @app.post("/get_postgres_schema", operation_id="get_postgres_schema")
+# async def get_postgres_schema(connection_str='postgresql://postgres:postgres@postgres-flows:5432/postgres'):
+#     logging.info(f"Trying to connect to: {connection_str}")
+#     schema = {}
 
-    query_columns = """
-    SELECT
-        table_name,
-        column_name,
-        data_type
-    FROM
-        information_schema.columns
-    WHERE
-        table_schema = 'public'
-    ORDER BY
-        table_name, ordinal_position;
-    """
+#     query_columns = """
+#     SELECT
+#         table_name,
+#         column_name,
+#         data_type
+#     FROM
+#         information_schema.columns
+#     WHERE
+#         table_schema = 'public'
+#     ORDER BY
+#         table_name, ordinal_position;
+#     """
 
-    try:
-        conn = await asyncpg.connect(connection_str)
-        print("Conexión exitosa")
-    except Exception as e:
-        print(f"Error de conexión: {e}")
-        return {}
+#     try:
+#         conn = await asyncpg.connect(connection_str)
+#         print("Conexión exitosa")
+#     except Exception as e:
+#         print(f"Error de conexión: {e}")
+#         return {}
 
-    try:
-        rows = await conn.fetch(query_columns)
-        for row in rows:
-            table_name = row['table_name']
-            column_name = row['column_name']
-            data_type = row['data_type']
+#     try:
+#         rows = await conn.fetch(query_columns)
+#         for row in rows:
+#             table_name = row['table_name']
+#             column_name = row['column_name']
+#             data_type = row['data_type']
 
-            if table_name not in schema:
-                schema[table_name] = []
+#             if table_name not in schema:
+#                 schema[table_name] = []
 
-            schema[table_name].append({
-                "column": column_name,
-                "type": data_type
-            })
+#             schema[table_name].append({
+#                 "column": column_name,
+#                 "type": data_type
+#             })
 
-        # Filtrar tablas que no tienen registros
-        tables_to_remove = []
-        for table in schema.keys():
-            count_query = f'SELECT COUNT(*) FROM "{table}"'
-            count = await conn.fetchval(count_query)
-            if count == 0:
-                tables_to_remove.append(table)
+#         # Filtrar tablas que no tienen registros
+#         tables_to_remove = []
+#         for table in schema.keys():
+#             count_query = f'SELECT COUNT(*) FROM "{table}"'
+#             count = await conn.fetchval(count_query)
+#             if count == 0:
+#                 tables_to_remove.append(table)
 
-        if tables_to_remove:
-            print("Tablas sin registros y que se dejarán fuera del esquema:")
-            for table in tables_to_remove:
-                print(f"- {table}")
+#         if tables_to_remove:
+#             print("Tablas sin registros y que se dejarán fuera del esquema:")
+#             for table in tables_to_remove:
+#                 print(f"- {table}")
 
-        # Eliminar tablas sin registros
-        for table in tables_to_remove:
-            schema.pop(table)
+#         # Eliminar tablas sin registros
+#         for table in tables_to_remove:
+#             schema.pop(table)
 
-    finally:
-        await conn.close()
+#     finally:
+#         await conn.close()
     
-    print(f"Tipo del esquema generado: {type(schema)}")
-    return schema
+#     print(f"Tipo del esquema generado: {type(schema)}")
+#     return schema
 
 # @app.post("/generate_sql")
 # async def generate_sql(request: ChatMessage):
@@ -291,171 +291,171 @@ async def get_postgres_schema(connection_str='postgresql://postgres:postgres@pos
 #         return {"error": str(e)}
 
 
-def extract_identifiers(query: str):
-    print('Extract identifiers for query:', query)
-    tables = set(re.findall(r'FROM\s+([a-zA-Z_][\w]*)', query, re.IGNORECASE))
-    tables.update(re.findall(r'JOIN\s+([a-zA-Z_][\w]*)', query, re.IGNORECASE))
-    columns = set(re.findall(r'SELECT\s+(.*?)\s+FROM', query, re.IGNORECASE))
+# def extract_identifiers(query: str):
+#     print('Extract identifiers for query:', query)
+#     tables = set(re.findall(r'FROM\s+([a-zA-Z_][\w]*)', query, re.IGNORECASE))
+#     tables.update(re.findall(r'JOIN\s+([a-zA-Z_][\w]*)', query, re.IGNORECASE))
+#     columns = set(re.findall(r'SELECT\s+(.*?)\s+FROM', query, re.IGNORECASE))
 
-    column_parts = []
-    for col_block in columns:
-        for col in col_block.split(","):
-            col = col.strip()
+#     column_parts = []
+#     for col_block in columns:
+#         for col in col_block.split(","):
+#             col = col.strip()
 
-            # Omitir funciones SQL como COUNT(*), SUM(col), etc.
-            if re.match(r'^\s*\w+\s*\(.*\)', col):  # detecta funciones SQL
-                continue
+#             # Omitir funciones SQL como COUNT(*), SUM(col), etc.
+#             if re.match(r'^\s*\w+\s*\(.*\)', col):  # detecta funciones SQL
+#                 continue
 
-            col = re.sub(r'\(.*?\)', '', col)  # eliminar funciones si no se omitió antes
-            col = col.split(" as ")[0].split(".")[-1].strip()
-            if col and col != "*":
-                column_parts.append(col)
+#             col = re.sub(r'\(.*?\)', '', col)  # eliminar funciones si no se omitió antes
+#             col = col.split(" as ")[0].split(".")[-1].strip()
+#             if col and col != "*":
+#                 column_parts.append(col)
 
-    return tables, set(column_parts)
+#     return tables, set(column_parts)
 
-def extract_tables_and_columns_from_json(schema_text):
-    try:
-        # Convertimos string JSON a diccionario
-        schema = json.loads(schema_text)
-    except json.JSONDecodeError as e:
-        print("Error parseando JSON:", e)
-        return set(), set()
+# def extract_tables_and_columns_from_json(schema_text):
+#     try:
+#         # Convertimos string JSON a diccionario
+#         schema = json.loads(schema_text)
+#     except json.JSONDecodeError as e:
+#         print("Error parseando JSON:", e)
+#         return set(), set()
 
-    all_tables = set()
-    all_columns = set()
+#     all_tables = set()
+#     all_columns = set()
 
-    # Recorremos las tablas
-    for table in schema.get("tables", []):
-        table_name = table.get("name")
-        if table_name:
-            all_tables.add(table_name)
-        # Recorremos las columnas de cada tabla
-        for column in table.get("columns", []):
-            column_name = column.get("name")
-            if column_name:
-                all_columns.add(column_name)
-    print(all_tables)
-    print('all_tables')
-    return all_tables, all_columns
+#     # Recorremos las tablas
+#     for table in schema.get("tables", []):
+#         table_name = table.get("name")
+#         if table_name:
+#             all_tables.add(table_name)
+#         # Recorremos las columnas de cada tabla
+#         for column in table.get("columns", []):
+#             column_name = column.get("name")
+#             if column_name:
+#                 all_columns.add(column_name)
+#     print(all_tables)
+#     print('all_tables')
+#     return all_tables, all_columns
 
-def clean_column_identifiers(columns_used):
-    cleaned = set()
-    for col in columns_used:
-        # Eliminar alias tipo "AS algo"
-        col = re.sub(r"\s+AS\s+\w+", "", col, flags=re.IGNORECASE)
+# def clean_column_identifiers(columns_used):
+#     cleaned = set()
+#     for col in columns_used:
+#         # Eliminar alias tipo "AS algo"
+#         col = re.sub(r"\s+AS\s+\w+", "", col, flags=re.IGNORECASE)
 
-        # Eliminar funciones SQL comunes (ej: DATE_TRUNC(...), SUM(...), etc.)
-        col = re.sub(r"\b[A-Z_]+\s*\([^)]*\)", "", col, flags=re.IGNORECASE)
+#         # Eliminar funciones SQL comunes (ej: DATE_TRUNC(...), SUM(...), etc.)
+#         col = re.sub(r"\b[A-Z_]+\s*\([^)]*\)", "", col, flags=re.IGNORECASE)
 
-        # Quitar comas, paréntesis, y espacios residuales
-        col = col.replace(")", "").replace("(", "")
-        col = col.replace(",", "").strip().strip('"').strip("'")
+#         # Quitar comas, paréntesis, y espacios residuales
+#         col = col.replace(")", "").replace("(", "")
+#         col = col.replace(",", "").strip().strip('"').strip("'")
 
-        # Ignorar vacíos o palabras reservadas
-        if col and col.upper() not in {"DATE_TRUNC", "SUM", "COUNT", "AVG", "MIN", "MAX"}:
-            cleaned.add(col)
-    return cleaned
+#         # Ignorar vacíos o palabras reservadas
+#         if col and col.upper() not in {"DATE_TRUNC", "SUM", "COUNT", "AVG", "MIN", "MAX"}:
+#             cleaned.add(col)
+#     return cleaned
 
-@app.post("/validate_sql", operation_id="validate_sql")
-async def validate_sql(request: ValidateSQLRequest = Body(...)):
-    try:
-        print('validacion')
-        query = request.query
-        schema_text = request.schema
+# @app.post("/validate_sql", operation_id="validate_sql")
+# async def validate_sql(request: ValidateSQLRequest = Body(...)):
+#     try:
+#         print('validacion')
+#         query = request.query
+#         schema_text = request.schema
      
 
-        # Extraer identificadores
-        tables_used, columns_used = extract_identifiers(query)
-        columns_used = clean_column_identifiers(columns_used)
-        print('tablas de la query', tables_used)
-        print('columns used  de la query_____________________', columns_used)
-        # print("tipo de schema_text:", type(schema_text))
-        # print("contenido de schema_text:", schema_text)
+#         # Extraer identificadores
+#         tables_used, columns_used = extract_identifiers(query)
+#         columns_used = clean_column_identifiers(columns_used)
+#         print('tablas de la query', tables_used)
+#         print('columns used  de la query_____________________', columns_used)
+#         # print("tipo de schema_text:", type(schema_text))
+#         # print("contenido de schema_text:", schema_text)
 
-        print('Se han extraído los identificadores del query')
+#         print('Se han extraído los identificadores del query')
 
-        all_tables, all_columns = extract_tables_and_columns_from_json(schema_text)
-        print('Se han extraído las tablas y columnas del texto schema')
-        print('tablas del esquema',all_tables )
+#         all_tables, all_columns = extract_tables_and_columns_from_json(schema_text)
+#         print('Se han extraído las tablas y columnas del texto schema')
+#         print('tablas del esquema',all_tables )
 
-        invalid_tables = tables_used - all_tables
-        print('invalid tables', invalid_tables)
-        invalid_columns = columns_used - all_columns
+#         invalid_tables = tables_used - all_tables
+#         print('invalid tables', invalid_tables)
+#         invalid_columns = columns_used - all_columns
 
-        if invalid_tables:
-            return {"valid": False, "error": f"Tablas no existentes: {', '.join(invalid_tables)}"}
-        if invalid_columns:
-            return {"valid": False, "error": f"Columnas no existentes: {', '.join(invalid_columns)}"}
+#         if invalid_tables:
+#             return {"valid": False, "error": f"Tablas no existentes: {', '.join(invalid_tables)}"}
+#         if invalid_columns:
+#             return {"valid": False, "error": f"Columnas no existentes: {', '.join(invalid_columns)}"}
 
-        return {"valid": True, "error": None}
+#         return {"valid": True, "error": None}
 
-    except Exception as e:
-        return {"valid": False, "error": f"Error durante validación: {str(e)}"}
+#     except Exception as e:
+#         return {"valid": False, "error": f"Error durante validación: {str(e)}"}
 
-@app.post("/saludar")
-async def saludar_tool(nombre: str):
-    """
-    Tool simple que saluda a la persona cuyo nombre se recibe como argumento.
-    """
-    salida= {"mensaje": f"¡Hola chiribita, {nombre}!"}
-    print(salida)
-    print(type(salida))
-    return salida
+# @app.post("/saludar")
+# async def saludar_tool(nombre: str):
+#     """
+#     Tool simple que saluda a la persona cuyo nombre se recibe como argumento.
+#     """
+#     salida= {"mensaje": f"¡Hola chiribita, {nombre}!"}
+#     print(salida)
+#     print(type(salida))
+#     return salida
 
 
-@app.post("/execute_sql", operation_id="execute_sql")
-async def execute_sql(request: ExecuteSQLRequest = Body(...),  connection_str = 'postgresql://postgres:postgres@postgres-flows:5432/postgres'):
-    try:
-        # 1️⃣ Validar que la query sea válida
-        if not request.valid:
-            return {"error": f"Validación fallida: {request.error or 'Error desconocido'}"}
+# @app.post("/execute_sql", operation_id="execute_sql")
+# async def execute_sql(request: ExecuteSQLRequest = Body(...),  connection_str = 'postgresql://postgres:postgres@postgres-flows:5432/postgres'):
+#     try:
+#         # 1️⃣ Validar que la query sea válida
+#         if not request.valid:
+#             return {"error": f"Validación fallida: {request.error or 'Error desconocido'}"}
 
-        raw_query = request.query.strip()
-        print('received query:', raw_query)
+#         raw_query = request.query.strip()
+#         print('received query:', raw_query)
 
-        if not raw_query:
-            return {"error": "No se proporcionó una consulta SQL."}
+#         if not raw_query:
+#             return {"error": "No se proporcionó una consulta SQL."}
 
-        # Eliminar backticks primero
-        cleaned_query = raw_query.replace("```", "").strip()
+#         # Eliminar backticks primero
+#         cleaned_query = raw_query.replace("```", "").strip()
 
-        # Manejar el caso donde viene con "json" al inicio
-        if cleaned_query.lower().startswith("json"):
-            # Remover la palabra "json" y limpiar espacios
-            cleaned_query = cleaned_query[4:].strip()
+#         # Manejar el caso donde viene con "json" al inicio
+#         if cleaned_query.lower().startswith("json"):
+#             # Remover la palabra "json" y limpiar espacios
+#             cleaned_query = cleaned_query[4:].strip()
 
-        # Extraer SQL si viene como JSON
-        if cleaned_query.startswith("{"):
-            try:
-                query_dict = json.loads(cleaned_query)
-                query = query_dict.get("query", "").strip()
-                if not query:
-                    return {"error": "JSON recibido no contiene la clave 'query' o está vacío."}
-            except json.JSONDecodeError as e:
-                return {"error": f"JSON inválido en la query: {str(e)}"}
-        else:
-            query = cleaned_query
+#         # Extraer SQL si viene como JSON
+#         if cleaned_query.startswith("{"):
+#             try:
+#                 query_dict = json.loads(cleaned_query)
+#                 query = query_dict.get("query", "").strip()
+#                 if not query:
+#                     return {"error": "JSON recibido no contiene la clave 'query' o está vacío."}
+#             except json.JSONDecodeError as e:
+#                 return {"error": f"JSON inválido en la query: {str(e)}"}
+#         else:
+#             query = cleaned_query
 
-        print('query limpia', query)
+#         print('query limpia', query)
 
-        # 3️⃣ Conectarse a la base de datos
-        connection = await asyncpg.connect(connection_str)
+#         # 3️⃣ Conectarse a la base de datos
+#         connection = await asyncpg.connect(connection_str)
 
-        # 4️⃣ Ejecutar SQL
-        if query.lower().startswith("select"):
-            rows = await connection.fetch(query)
-            result = [dict(row) for row in rows]
-        else:
-            await connection.execute(query)
-            print('esta en la conexion')
-            result = "Consulta ejecutada correctamente (sin resultados)"
+#         # 4️⃣ Ejecutar SQL
+#         if query.lower().startswith("select"):
+#             rows = await connection.fetch(query)
+#             result = [dict(row) for row in rows]
+#         else:
+#             await connection.execute(query)
+#             print('esta en la conexion')
+#             result = "Consulta ejecutada correctamente (sin resultados)"
 
-        # 5️⃣ Cerrar conexión
-        await connection.close()
-        return {"result": result}
+#         # 5️⃣ Cerrar conexión
+#         await connection.close()
+#         return {"result": result}
 
-    except Exception as e:
-        return {"error": f"Error al ejecutar SQL: {str(e)}"}
+#     except Exception as e:
+#         return {"error": f"Error al ejecutar SQL: {str(e)}"}
 
 # mcp = FastMCP.from_fastapi(app=app)
 
@@ -487,14 +487,14 @@ mcp.mount()
 # print(mcp.tools)
 
 
-from fastapi.responses import JSONResponse
+# from fastapi.responses import JSONResponse
 
-@app.get("/mcp/describe")
-async def mcp_describe():
-    tools_json = [tool.dict() for tool in mcp.tools]
-    return JSONResponse(tools_json)
+# @app.get("/mcp/describe")
+# async def mcp_describe():
+#     tools_json = [tool.dict() for tool in mcp.tools]
+#     return JSONResponse(tools_json)
 
-from fastapi import Body
+# from fastapi import Body
 
 # @app.post("/mcp")
 # async def mcp_call_tool(
