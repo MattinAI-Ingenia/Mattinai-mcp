@@ -1,21 +1,25 @@
 from fastapi import FastAPI, HTTPException, Body, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+from typing import Literal
 from contextlib import asynccontextmanager
 from typing import List, Dict, Any, Optional
 from fastapi_mcp import FastApiMCP
 # from fastmcp import FastMCP
 from dotenv import load_dotenv
+import json
 import os
 import asyncpg
-from openai import OpenAI
-import re
-import json
 from presidio.processor import PresidioProcessor
 from pathlib import Path
+import httpx
+import uuid
+import logging
+from datetime import datetime
 
 # Global processor cache
 processor_cache = {}
-
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 load_dotenv()
 
 # api_key = os.getenv("OPENAI_API_KEY")
@@ -78,14 +82,14 @@ async def lifespan(app: FastAPI):
         ("flair", "ner-english", 0.4),
     ]
     
-    for model_family, model_name, threshold in configs:
-        try:
-            print(f"Creating {model_family} processor with {model_name}")
-            get_processor(model_family, model_name, threshold)
-        except Exception as e:
-            print(f"Warning: Failed to create {model_family}/{model_name} processor: {e}")
+    # for model_family, model_name, threshold in configs:
+    #     try:
+    #         print(f"Creating {model_family} processor with {model_name}")
+    #         get_processor(model_family, model_name, threshold)
+    #     except Exception as e:
+    #         print(f"Warning: Failed to create {model_family}/{model_name} processor: {e}")
     
-    print("Processors pre-loaded successfully")
+    # print("Processors pre-loaded successfully")
     yield
     
     # Shutdown cleanup
@@ -93,86 +97,307 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Presidio PII Anonymization Service", lifespan=lifespan)
 
-@app.post("/anonymize", response_model=AnonymizationResponse, operation_id="anonymize_text")
-async def anonymize_text(request: AnonymizationRequest):
-    try:
-        processor = get_processor(
-            request.model_family,
-            request.model_name,
-            request.threshold
-        )
+# @app.post("/anonymize", response_model=AnonymizationResponse, operation_id="anonymize_text")
+# async def anonymize_text(request: AnonymizationRequest):
+#     try:
+#         processor = get_processor(
+#             request.model_family,
+#             request.model_name,
+#             request.threshold
+#         )
 
-        processed_text, entities = processor.process_text(
-            text=request.text
-        )
+#         processed_text, entities = processor.process_text(
+#             text=request.text
+#         )
         
-        response = {"entities": entities}
+#         response = {"entities": entities}
         
-        return response
+#         return response
     
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error processing text: {str(e)}")
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=f"Error processing text: {str(e)}")
 
-class WordCountRequest(BaseModel):
-    text: str
-    include_spaces: bool = False
-    case_sensitive: bool = False
+# class WordCountRequest(BaseModel):
+#     text: str
+#     include_spaces: bool = False
+#     case_sensitive: bool = False
 
-class WordCountResponse(BaseModel):
-    word_count: int
-    character_count: int
-    character_count_no_spaces: int
-    sentence_count: int
-    paragraph_count: int
-    most_common_word: str
-    most_common_count: int
+# class WordCountResponse(BaseModel):
+#     word_count: int
+#     character_count: int
+#     character_count_no_spaces: int
+#     sentence_count: int
+#     paragraph_count: int
+#     most_common_word: str
+#     most_common_count: int
 
-@app.post("/word_count", response_model=WordCountResponse, operation_id="count_words")
-async def count_words(request: WordCountRequest):
-    try:
-        text = request.text
-        if not text.strip():
-            raise HTTPException(status_code=400, detail="El texto no puede estar vacío")
+# @app.post("/word_count", response_model=WordCountResponse, operation_id="count_words")
+# async def count_words(request: WordCountRequest):
+#     try:
+#         text = request.text
+#         if not text.strip():
+#             raise HTTPException(status_code=400, detail="El texto no puede estar vacío")
         
-        # Contadores básicos
-        words = text.split()
-        word_count = len(words)
-        character_count = len(text)
-        character_count_no_spaces = len(text.replace(' ', ''))
+#         # Contadores básicos
+#         words = text.split()
+#         word_count = len(words)
+#         character_count = len(text)
+#         character_count_no_spaces = len(text.replace(' ', ''))
         
-        # Contar oraciones (aproximado)
-        sentence_count = len(re.findall(r'[.!?]+', text))
+#         # Contar oraciones (aproximado)
+#         sentence_count = len(re.findall(r'[.!?]+', text))
         
-        # Contar párrafos
-        paragraph_count = len([p for p in text.split('\n\n') if p.strip()])
+#         # Contar párrafos
+#         paragraph_count = len([p for p in text.split('\n\n') if p.strip()])
         
-        # Palabra más común
-        if not request.case_sensitive:
-            words = [w.lower() for w in words]
+#         # Palabra más común
+#         if not request.case_sensitive:
+#             words = [w.lower() for w in words]
         
-        # Limpiar palabras de puntuación
-        clean_words = [re.sub(r'[^\w]', '', word) for word in words if word]
-        word_freq = {}
-        for word in clean_words:
-            if word:
-                word_freq[word] = word_freq.get(word, 0) + 1
+#         # Limpiar palabras de puntuación
+#         clean_words = [re.sub(r'[^\w]', '', word) for word in words if word]
+#         word_freq = {}
+#         for word in clean_words:
+#             if word:
+#                 word_freq[word] = word_freq.get(word, 0) + 1
         
-        most_common_word = max(word_freq, key=word_freq.get) if word_freq else ""
-        most_common_count = word_freq.get(most_common_word, 0)
+#         most_common_word = max(word_freq, key=word_freq.get) if word_freq else ""
+#         most_common_count = word_freq.get(most_common_word, 0)
         
-        return WordCountResponse(
-            word_count=word_count,
-            character_count=character_count,
-            character_count_no_spaces=character_count_no_spaces,
-            sentence_count=sentence_count,
-            paragraph_count=paragraph_count,
-            most_common_word=most_common_word,
-            most_common_count=most_common_count
-        )
+#         return WordCountResponse(
+#             word_count=word_count,
+#             character_count=character_count,
+#             character_count_no_spaces=character_count_no_spaces,
+#             sentence_count=sentence_count,
+#             paragraph_count=paragraph_count,
+#             most_common_word=most_common_word,
+#             most_common_count=most_common_count
+#         )
     
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error procesando el texto: {str(e)}")
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=f"Error procesando el texto: {str(e)}")
 
+ngrok_url = "https://porsche-reproductive-nonascertainably.ngrok-free.dev"
+
+class DataSourceRegistrationRequest(BaseModel):
+    name: str
+    description: str
+    type: Literal["postgresql", "mysql", "sqlite", "mongodb"] 
+    host: str
+    port: int
+    database: str
+    username: str
+    password: str
+    schema: Optional[str] = None
+
+@app.post("/register_datasource", operation_id="register_datasource")
+async def register_datasource(request: DataSourceRegistrationRequest, user_id: int):
+    """
+    Register a new data source in the platform.
+    Supports PostgreSQL, MySQL, MongoDB, and other database types.
+    """
+    try:
+        # Call your backend API
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{ngrok_url}/api/v1/data-sources/",
+                json={
+                    "name": request.name,
+                    "description": request.description,
+                    "type": request.type,
+                    "connection": {
+                        "host": request.host,
+                        "port": request.port,
+                        "database": request.database,
+                        "username": request.username,
+                        "password": request.password
+                    }
+                },
+                params={"user_id": user_id, "schema": request.schema}  # Handle user_id properly
+            )
+            response.raise_for_status()
+            return response.json()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class CreateDashboardRequest(BaseModel):
+    user_id: int
+    name: str
+    description: str
+
+@app.post("/create_dashboard", operation_id="create_dashboard")
+async def create_dashboard(request: CreateDashboardRequest):
+    """Create a new empty dashboard for the user."""
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            f"{ngrok_url}/api/v1/dashboards/save",
+            json={
+                "user_id": request.user_id,
+                "name": request.name,
+                "description": request.description,
+                "visualizations": []
+            }
+        )
+
+        sources_response = await client.get(
+            f"{ngrok_url}/api/v1/data-sources/",
+            params={"user_id": request.user_id}
+        )
+
+        response.raise_for_status()
+        return {
+                "dashboard": response.json(),
+                "available_data_sources": sources_response.json()
+            }
+    
+class AddVisualizationRequest(BaseModel):
+    user_id: int
+    dashboard_id: int
+    query: str  # NLP query like "show sales by region as pie chart"
+
+@app.post("/add_visualization", operation_id="add_visualization")
+async def add_visualization(request: AddVisualizationRequest):
+    """Generate and add a visualization to an existing dashboard."""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        # Generate viz config
+        viz_response = await client.post(
+            f"{ngrok_url}/api/v1/nlp/query",
+            json={"query": request.query},
+            params={"user_id": request.user_id}
+        )
+        viz_response.raise_for_status()
+        viz_data = viz_response.json()
+        
+        # Check if successful
+        if not viz_data.get("success"):
+            raise HTTPException(500, f"Viz generation failed: {viz_data.get('error')}")
+        
+        # Load dashboard
+        dash_response = await client.get(f"{ngrok_url}/api/v1/dashboards/{request.dashboard_id}")
+        dash_response.raise_for_status()
+        dashboard = dash_response.json()
+        
+        # Format visualization for dashboard
+        viz_result = viz_data["result"]
+        formatted_viz = {
+            "id": str(uuid.uuid4()),
+            "title": viz_result["title"],
+            "description": viz_result.get("description", ""),
+            "chart_type": viz_result["chart_type"],
+            "data_source": viz_result["data_source"],
+            "query": {
+                "type": "mongodb" if "mongodb_query" in viz_result else "sql",
+                "statement": viz_result.get("mongodb_query") or viz_result.get("sql")
+            },
+            "original_query": viz_result["original_user_query"],
+            "query_config": viz_result["query_config"],
+            "config": viz_result["config"],
+            "edit_history": [],
+            "created_at": datetime.now().isoformat() + "Z"
+        }
+        
+        # Add to dashboard
+        dashboard_data = dashboard["dashboard_data"]
+        dashboard["dashboard_data"]["visualizations"].append(formatted_viz)
+        dashboard_data["id"] = request.dashboard_id
+        dashboard["dashboard_data"]["user_id"] = request.user_id
+        
+        # Save
+        save_response = await client.post(
+            f"{ngrok_url}/api/v1/dashboards/save",
+            json=dashboard_data
+        )
+        save_response.raise_for_status()
+        return {
+            **save_response.json(),
+            "action_taken": "visualization_added" 
+        }
+    
+class EditVisualizationRequest(BaseModel):
+    user_id: int
+    dashboard_id: int
+    visualization_id: str
+    edit_instructions: str
+
+@app.post("/edit_dashboard_visualization", operation_id="edit_dashboard_visualization")
+async def edit_dashboard_visualization(request: EditVisualizationRequest):
+    """Edit a specific visualization in an open dashboard."""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        # Load dashboard
+        dash_response = await client.get(f"{ngrok_url}/api/v1/dashboards/{request.dashboard_id}")
+        dash_response.raise_for_status()
+        dashboard = dash_response.json()
+        
+        # Find the visualization
+        viz_index = next((i for i, v in enumerate(dashboard["dashboard_data"]["visualizations"]) 
+                         if v["id"] == request.visualization_id), None)
+        
+        if viz_index is None:
+            raise HTTPException(404, "Visualization not found")
+        
+        original_viz = dashboard["dashboard_data"]["visualizations"][viz_index]
+        
+        # ⭐ Transform to format expected by /nlp/query/edit
+        edit_payload = {
+            "original_visualization": {
+                "title": original_viz["title"],
+                "description": original_viz.get("description", ""),
+                "chart_type": original_viz["chart_type"],
+                "data_source": original_viz["data_source"],
+                "original_user_query": original_viz.get("original_query", original_viz.get("original_user_query", "")),  # ⭐ Map correctly
+                "sql": original_viz.get("query", {}).get("statement") if original_viz.get("query", {}).get("type") == "sql" else None,
+                "mongodb_query": original_viz.get("query", {}).get("statement") if original_viz.get("query", {}).get("type") == "mongodb" else None,
+                "query_config": original_viz.get("query_config", {}),
+                "config": original_viz.get("config", {}),
+                "edit_history": original_viz.get("edit_history", [])
+            },
+            "edit_instructions": request.edit_instructions
+        }
+        
+        # Call edit endpoint
+        edit_response = await client.post(
+            f"{ngrok_url}/api/v1/nlp/query/edit",
+            json=edit_payload
+        )
+        edit_response.raise_for_status()
+        edited = edit_response.json()
+        
+        # ⭐ Transform result back to dashboard format
+        edited_result = edited["result"]
+        updated_viz = {
+            **original_viz,  # Keep id, created_at, etc.
+            "title": edited_result["title"],
+            "description": edited_result.get("description", ""),
+            "chart_type": edited_result["chart_type"],
+            "query": {
+                "type": "mongodb" if "mongodb_query" in edited_result else "sql",
+                "statement": edited_result.get("mongodb_query") or edited_result.get("sql")
+            },
+            "query_config": edited_result["query_config"],
+            "config": edited_result.get("config", {}),
+            "edit_history": edited_result.get("edit_history", []),
+            "created_at": original_viz.get("created_at", datetime.now().isoformat() + "Z")
+        }
+        
+        dashboard["dashboard_data"]["visualizations"][viz_index] = updated_viz
+        
+        dashboard["dashboard_data"]["user_id"] = request.user_id
+        dashboard["dashboard_data"]["id"] = request.dashboard_id
+
+        logger.info(f"Saving dashboard with viz: {updated_viz}")
+        logger.info(f"Full dashboard payload: {json.dumps(dashboard['dashboard_data'], indent=2)}")
+
+        # Save
+        save_response = await client.post(
+            f"{ngrok_url}/api/v1/dashboards/save", 
+            json=dashboard["dashboard_data"]
+        )
+
+        return {
+            **save_response.json(),
+            "action_taken": "visualization_edited" 
+        }
+        
 # @app.post("/get_postgres_schema", operation_id="get_postgres_schema")
 # async def get_postgres_schema(connection_str='postgresql://postgres:postgres@postgres-flows:5432/postgres'):
 #     logging.info(f"Trying to connect to: {connection_str}")
@@ -484,7 +709,7 @@ mcp = FastApiMCP(
 
 mcp.mount()
 
-# print(mcp.tools)
+print(mcp.tools)
 
 
 # from fastapi.responses import JSONResponse
@@ -519,3 +744,7 @@ mcp.mount()
 # @app.post("/mcp/messages/")
 # async def mcp_messages(request: Request):
 #     return await sse_transport.handle_fastapi_post_message(request)
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
