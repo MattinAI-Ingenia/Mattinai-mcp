@@ -38,9 +38,6 @@ class AnonymizationRequest(BaseModel):
 class AnonymizationResponse(BaseModel):
     entities: Optional[List[Dict[str, Any]]] = None
 
-class NLtoSQLRequest(BaseModel):
-    prompt: str
-    # schema: str = ""
 
 class ChatMessage(BaseModel):
     available_datasources: str
@@ -62,16 +59,9 @@ class GenerateNoSQLRequest(BaseModel):
     chart_type: str
     user_question: str
 
-class ValidateSQLRequest(BaseModel):
-    query: str
-    schema: str
-
-class ExecuteSQLRequest(BaseModel):
-    valid: bool
-    error: str | None = None
-    query: str
-
-
+class Greetings(BaseModel):
+    name: str
+  
 def get_processor(model_family, model_name, threshold):
     # Unique cache key
     cache_key = f"{model_family}_{model_name}_{threshold}"
@@ -101,14 +91,6 @@ async def lifespan(app: FastAPI):
         ("flair", "ner-english", 0.4),
     ]
     
-    # for model_family, model_name, threshold in configs:
-    #     try:
-    #         print(f"Creating {model_family} processor with {model_name}")
-    #         get_processor(model_family, model_name, threshold)
-    #     except Exception as e:
-    #         print(f"Warning: Failed to create {model_family}/{model_name} processor: {e}")
-    
-    # print("Processors pre-loaded successfully")
     yield
     
     # Shutdown cleanup
@@ -358,6 +340,17 @@ async def edit_dashboard_visualization(request: EditVisualizationRequest):
             "action_taken": "visualization_edited" 
         }
     
+@app.post("/saludar")
+async def saludar_tool(request: Greetings):
+    """
+    Tool simple que saluda a la persona cuyo nombre se recibe como argumento.
+    """
+    print('saludo')
+    salida= {"mensaje": f"¡Egun on, {request.name}!"}
+    
+    print(type(salida))
+    return salida
+
 
 @app.post("/select_datasource", operation_id="select_datasource")
 async def select_datasource(request: ChatMessage = Body(...)):
@@ -373,15 +366,16 @@ async def select_datasource(request: ChatMessage = Body(...)):
             2. The database must match the context and needs implied by the user's question.
             3. Always respond with the **exact name** of the database from the provided list. No extra text.
             4. If multiple databases seem suitable, choose the one that fits **best**.
-            5. database type should be mongodb, postgresql, mysql, etc.
+            5. database type should be mongodb or postgresql
 
             ##OUTPUT FORMAT:
             Always respond with the following json:
             {{
-            "datasource_name": choosen database name
-            "database_type": type of the database,
+            "database_name": choosen database name (from the list)
+            "database_type": choosen database type
             "explanation": brief explanation why you choose that database
             }}
+
         """
                     # 
         response = client.chat.completions.create(
@@ -401,6 +395,7 @@ async def select_datasource(request: ChatMessage = Body(...)):
 
     except Exception as e:
         return {"error": str(e)}
+
 
 @app.post("/generate_nosql", operation_id="generate_nosql")
 async def generate_nosql(request: GenerateNoSQLRequest = Body(...)):
@@ -445,13 +440,11 @@ async def generate_nosql(request: GenerateNoSQLRequest = Body(...)):
             {{
             "collection": "collection_name",
             "pipeline": [MongoDB aggregation pipeline array],
+            "database_name": name of the database where the query will be executed,
+            "database_type": type of the database where the query will be executed,
             "x_column": "exact field name for x-axis in final output",
             "y_column": "exact field name(s) for y-axis, comma-separated if multiple"
-            "datasource_name": name of the datsource where the query will be executed,
-            "database_type": type of the database where the query will be executed.
             }}
-
-            Do not add further information, only the JSON.
         """
         print('PROMPT GENERADO:')
         print(prompt)
@@ -474,6 +467,7 @@ async def generate_nosql(request: GenerateNoSQLRequest = Body(...)):
     except Exception as e:
         return {"error": str(e)}
              
+
 @app.post("/generate_sql", operation_id="generate_sql")
 async def generate_sql(request: GenerateSQLRequest = Body(...)):
   
@@ -496,43 +490,19 @@ async def generate_sql(request: GenerateSQLRequest = Body(...)):
             ### USER QUERY:
             {request.user_question}
 
-            ## RULES
-            1. **Only** use columns and tables that are present in the database schema.
-
-            2. **Always** use schema_name.table_name to construct the FROM statements.
-            - The schema NEVER contains columns. Columns only belong to tables.
-            - Inside the query, you must reference columns using table_name.column or alias.column, NEVER schema.column.
-
-            3. **Always** use lowercase when defining SQL aliases.
-            - Example: FROM bookings.flights AS f
-
-            4. Query optimization rules:
+            ##RULES
+            1. **Only** use columns and tables that are present in the databse schema.
+            2.**Always** use schema_name.table_name to construct the FROM statements. 
+            3. **Always** use lowercase when defining sql alias.
+            3. Build optimized for execution because we may have a lot of data: 
             - Pre-aggregate large tables in subqueries before joining
             - Avoid Cartesian products from one-to-many joins
             - Use indexes: add WHERE clauses on primary/foreign keys when possible
             - Limit result sets early with WHERE before GROUP BY
             - Use DISTINCT only when necessary
             - Prefer EXISTS over IN for subqueries with large datasets
-
-            5. Define an x column and y column title based on the alias of the generated queries.
-
-            6. If a GROUP BY is needed, **always** use the original column name, **never** the alias.
-
-            7. **Schemas are not tables. Never reference schema_name.column. This is invalid.**
-            - Correct: f.scheduled_arrival  (if f = bookings.flights)
-            - Incorrect: bookings.scheduled_arrival
-
-            8. When using schema.table in FROM, you MUST apply an alias and then use ONLY the alias for all column references.
-            - Correct: FROM bookings.flights AS f
-                        WHERE f.arrival_airport = 'KUF'
-            - Incorrect: FROM bookings.flights
-                            WHERE bookings.flights.arrival_airport = 'KUF'
-
-            9. Never assume a column belongs to the schema. Always check the table.
-
-            10. If multiple tables are used, ALWAYS alias all of them and only reference columns via their aliases.
-
-            11. Write clean, deterministic SQL. Avoid ambiguous references at all times.
+            4. Define a x column and y column title based on the alias of the generated queries.
+            5. If a GROUP BY is needed, **always** use the column name, **never** its alias.
                 
             ##SPECIFIC VISUALIZATION RULES
             1. If more than one row is needed in the time series, each category must be in a separate column of the resulting query data frame.
@@ -541,11 +511,11 @@ async def generate_sql(request: GenerateSQLRequest = Body(...)):
             Always respond with this json structure: 
             {{
             "query": generated sql query,
-            "x_column": exact same name given to the x column on the generated query,
-            "y_column": exact same name given to the y column on the generated query, if we have more than one y column, separate the titles with commas,
             "database_name": name of the database where the query will be executed,
-            "database_type": type of the database where the query will be executed.
-           }}
+            "database_type": type of the database where the query will be executed,
+            "x_column": exact same name given to the x column on the generated query,
+            "y_column": exact same name given to the y column on the generated query, if we have more than one y column, separate the titles with commas.
+            }}
         """
         
         response = client.chat.completions.create(
@@ -566,109 +536,6 @@ async def generate_sql(request: GenerateSQLRequest = Body(...)):
     except Exception as e:
         return {"error": str(e)}
 
-
-def extract_identifiers(query: str):
-    print('Extract identifiers for query:', query)
-    tables = set(re.findall(r'FROM\s+([a-zA-Z_][\w]*)', query, re.IGNORECASE))
-    tables.update(re.findall(r'JOIN\s+([a-zA-Z_][\w]*)', query, re.IGNORECASE))
-    columns = set(re.findall(r'SELECT\s+(.*?)\s+FROM', query, re.IGNORECASE))
-
-    column_parts = []
-    for col_block in columns:
-        for col in col_block.split(","):
-            col = col.strip()
-
-            # Omitir funciones SQL como COUNT(*), SUM(col), etc.
-            if re.match(r'^\s*\w+\s*\(.*\)', col):  # detecta funciones SQL
-                continue
-
-            col = re.sub(r'\(.*?\)', '', col)  # eliminar funciones si no se omitió antes
-            col = col.split(" as ")[0].split(".")[-1].strip()
-            if col and col != "*":
-                column_parts.append(col)
-
-    return tables, set(column_parts)
-
-def extract_tables_and_columns_from_json(schema_text):
-    try:
-        # Convertimos string JSON a diccionario
-        schema = json.loads(schema_text)
-    except json.JSONDecodeError as e:
-        print("Error parseando JSON:", e)
-        return set(), set()
-
-    all_tables = set()
-    all_columns = set()
-
-    # Recorremos las tablas
-    for table in schema.get("tables", []):
-        table_name = table.get("name")
-        if table_name:
-            all_tables.add(table_name)
-        # Recorremos las columnas de cada tabla
-        for column in table.get("columns", []):
-            column_name = column.get("name")
-            if column_name:
-                all_columns.add(column_name)
-    print(all_tables)
-    print('all_tables')
-    return all_tables, all_columns
-
-def clean_column_identifiers(columns_used):
-    cleaned = set()
-    for col in columns_used:
-        # Eliminar alias tipo "AS algo"
-        col = re.sub(r"\s+AS\s+\w+", "", col, flags=re.IGNORECASE)
-
-        # Eliminar funciones SQL comunes (ej: DATE_TRUNC(...), SUM(...), etc.)
-        col = re.sub(r"\b[A-Z_]+\s*\([^)]*\)", "", col, flags=re.IGNORECASE)
-
-        # Quitar comas, paréntesis, y espacios residuales
-        col = col.replace(")", "").replace("(", "")
-        col = col.replace(",", "").strip().strip('"').strip("'")
-
-        # Ignorar vacíos o palabras reservadas
-        if col and col.upper() not in {"DATE_TRUNC", "SUM", "COUNT", "AVG", "MIN", "MAX"}:
-            cleaned.add(col)
-    return cleaned
-
-@app.post("/validate_sql", operation_id="validate_sql")
-async def validate_sql(request: ValidateSQLRequest = Body(...)):
-    try:
-        print('validacion')
-        query = request.query
-        schema_text = request.schema
-     
-
-        # Extraer identificadores
-        tables_used, columns_used = extract_identifiers(query)
-        columns_used = clean_column_identifiers(columns_used)
-        print('tablas de la query', tables_used)
-        print('columns used  de la query_____________________', columns_used)
-        # print("tipo de schema_text:", type(schema_text))
-        # print("contenido de schema_text:", schema_text)
-
-        print('Se han extraído los identificadores del query')
-
-        all_tables, all_columns = extract_tables_and_columns_from_json(schema_text)
-        print('Se han extraído las tablas y columnas del texto schema')
-        print('tablas del esquema',all_tables )
-
-        invalid_tables = tables_used - all_tables
-        print('invalid tables', invalid_tables)
-        invalid_columns = columns_used - all_columns
-
-        if invalid_tables:
-            return {"valid": False, "error": f"Tablas no existentes: {', '.join(invalid_tables)}"}
-        if invalid_columns:
-            return {"valid": False, "error": f"Columnas no existentes: {', '.join(invalid_columns)}"}
-
-        return {"valid": True, "error": None}
-
-    except Exception as e:
-        return {"valid": False, "error": f"Error durante validación: {str(e)}"}
-
-
 mcp = FastApiMCP(
     app,
     name="Anonymization MCP",
@@ -678,7 +545,6 @@ mcp = FastApiMCP(
 )
 
 mcp.mount_sse()
-
 
 if __name__ == "__main__":
     import uvicorn
