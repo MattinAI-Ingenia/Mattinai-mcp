@@ -119,7 +119,7 @@ async def anonymize_text(request: AnonymizationRequest):
         raise HTTPException(status_code=500, detail=f"Error processing text: {str(e)}")
 
 
-ngrok_url = "https://lyndsay-semirigorous-raymond.ngrok-free.dev"
+backend_api = os.getenv("BACKEND_API", "https://lyndsay-semirigorous-raymond.ngrok-free.dev")
 
 class DataSourceRegistrationRequest(BaseModel):
     name: str
@@ -142,7 +142,7 @@ async def register_datasource(request: DataSourceRegistrationRequest, user_id: i
         # Call your backend API
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                f"{ngrok_url}/api/v1/data-sources/",
+                f"{backend_api}/api/v1/data-sources/",
                 json={
                     "name": request.name,
                     "description": request.description,
@@ -172,7 +172,7 @@ async def create_dashboard(request: CreateDashboardRequest):
     """Create a new empty dashboard for the user."""
     async with httpx.AsyncClient() as client:
         response = await client.post(
-            f"{ngrok_url}/api/v1/dashboards/save",
+            f"{backend_api}/api/v1/dashboards/save",
             json={
                 "user_id": request.user_id,
                 "name": request.name,
@@ -182,7 +182,7 @@ async def create_dashboard(request: CreateDashboardRequest):
         )
 
         sources_response = await client.get(
-            f"{ngrok_url}/api/v1/data-sources/",
+            f"{backend_api}/api/v1/data-sources/",
             params={"user_id": request.user_id}
         )
 
@@ -203,7 +203,7 @@ async def add_visualization(request: AddVisualizationRequest):
     async with httpx.AsyncClient(timeout=30.0) as client:
         # Generate viz config
         viz_response = await client.post(
-            f"{ngrok_url}/api/v1/nlp/query",
+            f"{backend_api}/api/v1/nlp/query",
             json={"query": request.query},
             params={"user_id": request.user_id}
         )
@@ -215,7 +215,7 @@ async def add_visualization(request: AddVisualizationRequest):
             raise HTTPException(500, f"Viz generation failed: {viz_data.get('error')}")
         
         # Load dashboard
-        dash_response = await client.get(f"{ngrok_url}/api/v1/dashboards/{request.dashboard_id}")
+        dash_response = await client.get(f"{backend_api}/api/v1/dashboards/{request.dashboard_id}")
         dash_response.raise_for_status()
         dashboard = dash_response.json()
         
@@ -246,7 +246,7 @@ async def add_visualization(request: AddVisualizationRequest):
         
         # Save
         save_response = await client.post(
-            f"{ngrok_url}/api/v1/dashboards/save",
+            f"{backend_api}/api/v1/dashboards/save",
             json=dashboard_data
         )
         save_response.raise_for_status()
@@ -266,7 +266,7 @@ async def edit_dashboard_visualization(request: EditVisualizationRequest):
     """Edit a specific visualization in an open dashboard."""
     async with httpx.AsyncClient(timeout=30.0) as client:
         # Load dashboard
-        dash_response = await client.get(f"{ngrok_url}/api/v1/dashboards/{request.dashboard_id}")
+        dash_response = await client.get(f"{backend_api}/api/v1/dashboards/{request.dashboard_id}")
         dash_response.raise_for_status()
         dashboard = dash_response.json()
         
@@ -298,7 +298,7 @@ async def edit_dashboard_visualization(request: EditVisualizationRequest):
         
         # Call edit endpoint
         edit_response = await client.post(
-            f"{ngrok_url}/api/v1/nlp/query/edit",
+            f"{backend_api}/api/v1/nlp/query/edit",
             json=edit_payload
         )
         edit_response.raise_for_status()
@@ -331,7 +331,7 @@ async def edit_dashboard_visualization(request: EditVisualizationRequest):
 
         # Save
         save_response = await client.post(
-            f"{ngrok_url}/api/v1/dashboards/save", 
+            f"{backend_api}/api/v1/dashboards/save", 
             json=dashboard["dashboard_data"]
         )
 
