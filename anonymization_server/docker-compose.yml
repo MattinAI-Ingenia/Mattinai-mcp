@@ -1,11 +1,17 @@
 version: '3.8'
 
 services:
-  # Your EXISTING MCP Tool Server
-  anonymization_server:
-    image: anonymization_server
+  mcp_server_lks:
+    image: mcp_server_lks
     build:
-      context: . # Assumes your server code is in this folder
+      context: .
       dockerfile: Dockerfile
     ports:
-      - "7070:8000" # Host 7070 -> Container 8000
+      - "7070:8000"
+    # volumes:
+    #   - ./app:/app  
+    networks:
+      - ai-core-tools_mattin-network
+networks:
+  ai-core-tools_mattin-network:
+    external: true
