@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Body, Request
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 from typing import List, Dict, Any, Optional, Literal
@@ -97,6 +98,16 @@ async def lifespan(app: FastAPI):
     processor_cache.clear()
 
 app = FastAPI(title="Presidio PII Anonymization Service", lifespan=lifespan)
+
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost").split(",")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.post("/anonymize", response_model=AnonymizationResponse, operation_id="anonymize_text")
 async def anonymize_text(request: AnonymizationRequest):

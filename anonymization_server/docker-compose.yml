@@ -1,17 +1,22 @@
-version: '3.8'
-
 services:
   mcp_server_lks:
     image: mcp_server_lks
     build:
       context: .
       dockerfile: Dockerfile
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - BACKEND_API=${BACKEND_API}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
     ports:
-      - "7070:8000"
+      - "7070:8000"      
     # volumes:
     #   - ./app:/app  
     networks:
       - ai-core-tools_mattin-network
+      - mattin-network
 networks:
   ai-core-tools_mattin-network:
+    external: true
+  mattin-network:
     external: true
