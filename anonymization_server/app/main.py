@@ -544,7 +544,7 @@ mcp = FastApiMCP(
     describe_full_response_schema=True
 )
 
-mcp.mount_sse()
+mcp.mount()
 
 if __name__ == "__main__":
     import uvicorn
